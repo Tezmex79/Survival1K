@@ -16,8 +16,12 @@ la volatilité binaire y est maximale, la taille des lignes est le contrôleur d
 | Part | Montant | Support eToro | Frais | Mode |
 |---|---|---|---|---|
 | ETF | 60 € | ETF MSCI World (0 commission, fractions dès ~10 $) | 0 % | Manuel, 20 € × 3 semaines, déclaré via `--etf` |
-| Biotech | 40 € | Lignes événementielles FDA/EMA, 10 € max chacune, 4 max | 0 % | Automatisé : simulation → démo eToro → réel eToro |
+| Biotech | 200 € | Lignes événementielles FDA/EMA, 20 € max chacune, 10 max | 0 % | Automatisé : simulation → démo eToro → réel eToro |
 | Crypto | 0 € | *(en sommeil, moteur conservé et réactivable via config)* | 1 % | — |
+
+> Financement en réel (instruction utilisateur du 15/10/2026) : la sleeve biotech de
+> 200 € sera financée par la vente de 200 € de la position réelle Medincell, au
+> moment du basculement en réel et sur instruction explicite.
 
 ### Règles biotech (`config.yaml > biotech`)
 - **Screening hebdo** (agent, sourcé) : catalyseur FDA (PDUFA/AdComm) ou EMA (CHMP)

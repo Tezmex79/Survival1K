@@ -13,7 +13,9 @@ mode: etoro-demo            # simulation | etoro-demo | etoro-real
 capital_eur: 100
 allocation:
   etf_eur: 60              # part manuelle chez eToro (0 commission, suivi automatisé)
-  biotech_eur: 40          # sleeve actions biomedicales a catalyseurs (pilotee par bio.py)
+  biotech_eur: 200         # sleeve biotech (décision utilisateur 15/10/2026 : passage
+                           # de 40 à 200 EUR ; en réel, financée par la vente de 200 EUR
+                           # de Medincell au moment du basculement en réel)
   crypto_eur: 0            # sleeve crypto en sommeil (moteur conserve, reactivable)
 
 # ---------------------------------------------------------------
@@ -23,11 +25,14 @@ allocation:
 # ---------------------------------------------------------------
 biotech:
   actif: true
-  max_par_ligne_eur: 10    # eToro : minimum ~10 USD par ordre, et c'est aussi notre plafond
-  max_positions: 4         # 4 x 10 EUR = 40 EUR pleinement deplies
+  max_par_ligne_eur: 20    # eToro : minimum ~10 USD ; plafond porté à 20 EUR avec le
+                           # budget 200 EUR (10 lignes max) — un refus à -60 % coûte
+                           # 12 EUR, soit ~0,6 % du patrimoine biotech total
+  max_positions: 10        # 10 x 20 EUR = 200 EUR pleinement déployés
   frais_pct: 0.0           # actions/ETF eToro : 0 commission (spread non modelise)
   stop_loss_pct: -30       # sortie anticipee si la ligne decroche avant le catalyseur
   regle_sortie: "vendre dans les jours qui suivent la resolution du catalyseur (approbation OU refus) — l'evenement est prix dans le titre, on ne s'attache pas"
+  rythme_deploiement: "1 à 2 nouvelles lignes par lundi de screening selon les candidats qualifiés — déployer 180 EUR restants prend typiquement 6 à 10 semaines ; ne jamais forcer un achat sans catalyseur daté"
   criteres_screening:
     - "catalyseur FDA (PDUFA/AdComm) ou EMA (CHMP/avis EC) date dans les 2 a 8 prochaines semaines"
     - "capitalisation > 300 M$ (eviter les microcaps a dilution quasi certaine)"
