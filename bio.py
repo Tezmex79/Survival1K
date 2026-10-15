@@ -42,6 +42,13 @@ def main():
     p_sell.add_argument("raison", nargs="?", default="sortie manuelle")
     sub.add_parser("journal", help="historique des operations")
     sub.add_parser("check", help="controle radar : alertes stop-loss et catalyseurs")
+    p_track = sub.add_parser("track", help="declarer une position REELLE detenue hors papier")
+    p_track.add_argument("ticker", help="symbole Yahoo, ex. MEDIC.PA")
+    p_track.add_argument("montant_eur", type=float)
+    p_track.add_argument("--nom", default="")
+    p_track.add_argument("--note", default="")
+    p_untrack = sub.add_parser("untrack", help="retirer une position reelle declaree")
+    p_untrack.add_argument("ticker")
     args = parser.parse_args()
     if not args.cmd:
         args.cmd = "status"
@@ -80,6 +87,31 @@ def main():
         biotech.sauver(etat)
         print(f"Vente papier {ticker} @ {prix} USD — P&L {ligne['pnl_eur']:+.2f} EUR "
               f"({ligne['raison_sortie']})")
+        return
+
+    if args.cmd == "track":
+        ticker = args.ticker.upper()
+        cours = biotech.cours_usd([ticker])
+        c = cours.get(ticker.lower())
+        if not c:
+            raise SystemExit(f"Cours introuvable pour {ticker} (symbole Yahoo attendu, ex. MEDIC.PA)")
+        p = biotech.suivre_reelle(etat, ticker, args.montant_eur, c["close"],
+                                  c.get("devise", ""), t, args.nom, args.note)
+        biotech.sauver(etat)
+        print(f"Position reelle declaree : {p['qty']} {ticker} "
+              f"({args.montant_eur:.2f} EUR, cours {c['close']} {c.get('devise')}) — "
+              f"le P&L est suivi a partir de la declaration ; donner la quantite exacte "
+              f"eToro plus tard pour affiner la base")
+        return
+
+    if args.cmd == "untrack":
+        avant = len(etat["positions_reelles"])
+        etat["positions_reelles"] = [p for p in etat["positions_reelles"]
+                                     if p["ticker"].upper() != args.ticker.upper()]
+        if len(etat["positions_reelles"]) == avant:
+            raise SystemExit(f"{args.ticker} n'est pas une position reelle declaree")
+        biotech.sauver(etat)
+        print(f"Position reelle {args.ticker} retiree du suivi.")
         return
 
     if args.cmd == "check":
@@ -126,6 +158,11 @@ def main():
         print(f"  {l['ticker']:<6} {l['nom'][:28]:<28} {l['valeur_eur']:>6.2f} EUR "
               f"({l['pnl_eur']:+5.2f} / {l['pnl_pct']:+6.2f} %) | catalyseur: "
               f"{l['catalyseur']} ({l['date_catalyseur']}, J{jc_txt})")
+    if v.get("reelles"):
+        print(f"Positions reelles declarees : {v['valeur_reelles_eur']:.2f} EUR")
+        for l in v["reelles"]:
+            print(f"  {l['ticker']:<9} {l['nom'][:26]:<26} {l['valeur_eur']:>8.2f} EUR "
+                  f"({l['pnl_eur']:+7.2f} / {l['pnl_pct']:+6.2f} % depuis declaration)")
 
 
 if __name__ == "__main__":

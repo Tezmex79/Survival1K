@@ -24,10 +24,10 @@ def now_iso():
 
 
 def cours_usd(symboles):
-    """Dernier prix Yahoo Finance : {'bbio': {'close': x, 'date': y}} (USD).
+    """Dernier prix Yahoo Finance : {'medic.pa': {'close': x, 'date': y, 'devise': z}}.
 
-    Symboles US simples ('BBIO'), une requete par ticker, bascule query1/query2
-    en cas d'echec. Le prix est le regularMarketPrice (quasi temps reel).
+    Symboles Yahoo ('BBIO', 'MEDIC.PA'), une requete par ticker, bascule
+    query1/query2 en cas d'echec. `devise` vient de meta.currency (USD, EUR...).
     """
     out = {}
     for s in symboles:
@@ -45,7 +45,8 @@ def cours_usd(symboles):
                 ts = int(meta.get("regularMarketTime") or 0)
                 date = (datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
                         if ts else "")
-                out[s.lower()] = {"close": prix, "date": date}
+                out[s.lower()] = {"close": prix, "date": date,
+                                  "devise": str(meta.get("currency", "")).upper()}
                 break
             except Exception:
                 continue
@@ -59,10 +60,38 @@ def _defaut(budget_eur):
 def charger(cfg):
     DATA.mkdir(exist_ok=True)
     if FICHIER.exists():
-        return json.loads(FICHIER.read_text(encoding="utf-8"))
-    etat = _defaut(cfg["allocation"].get("biotech_eur", 0))
-    sauver(etat)
+        etat = json.loads(FICHIER.read_text(encoding="utf-8"))
+    else:
+        etat = _defaut(cfg["allocation"].get("biotech_eur", 0))
+        sauver(etat)
+    etat.setdefault("positions_reelles", [])  # migration des etats anciens
     return etat
+
+
+def suivre_reelle(etat, ticker, montant_eur, cours, devise, taux_usd, nom="", note=""):
+    """Enregistre une position REELLE deja detenue (hors portefeuille papier).
+
+    La quantite est deduite du montant declare et du cours du jour ; la base
+    de P&L est le montant declare (affiner avec la quantite exacte lue sur
+    eToro si l'utilisateur la fournit).
+    """
+    cours_eur = cours / taux_si_usd(devise, taux_usd)
+    p = {
+        "ticker": ticker.upper(), "nom": nom, "date_declaration": now_iso(),
+        "montant_declare_eur": round(float(montant_eur), 2),
+        "prix_declaration": cours, "devise": devise,
+        "qty": round(float(montant_eur) / cours_eur, 4),
+        "note": note,
+    }
+    etat["positions_reelles"].append(p)
+    etat["journal"].append({"date": now_iso(), "action": "track",
+                            "ticker": p["ticker"], "eur": p["montant_declare_eur"]})
+    return p
+
+
+def taux_si_usd(devise, taux_usd):
+    """Taux de conversion cours -> EUR : 1/taux si le titre cote en USD, sinon 1."""
+    return (1.0 / taux_usd) if devise == "USD" else 1.0
 
 
 def sauver(etat):
@@ -122,6 +151,30 @@ def jours_avant_catalyseur(pos, aujourdhui=None):
     return (cible - ref).days
 
 
+def valeur_reelles(etat, taux_usd):
+    """Valorise les positions reelles declarees (hors sleeve papier)."""
+    res = etat.get("positions_reelles", [])
+    tickers = [p["ticker"] for p in res]
+    cours = cours_usd(tickers) if tickers else {}
+    lignes = []
+    total = 0.0
+    for p in res:
+        c = cours.get(p["ticker"].lower())
+        if not c:
+            lignes.append({**p, "cours": None, "valeur_eur": p["montant_declare_eur"],
+                           "pnl_eur": 0.0, "pnl_pct": 0.0})
+            total += p["montant_declare_eur"]
+            continue
+        cours_eur = c["close"] / taux_si_usd(c.get("devise", p["devise"]), taux_usd)
+        val = p["qty"] * cours_eur
+        pnl = val - p["montant_declare_eur"]
+        total += val
+        lignes.append({**p, "cours": c["close"], "devise_cours": c.get("devise"),
+                       "valeur_eur": round(val, 2), "pnl_eur": round(pnl, 2),
+                       "pnl_pct": round(pnl / p["montant_declare_eur"] * 100, 2)})
+    return lignes, round(total, 2)
+
+
 def valeur(etat, taux_usd):
     """Valeur actuelle de la sleeve : lignes valorisees + cash non investi (EUR)."""
     lignes = []
@@ -138,10 +191,13 @@ def valeur(etat, taux_usd):
                        "valeur_eur": round(val_eur, 2), "pnl_eur": round(pnl, 2),
                        "pnl_pct": round(pnl / p["eur_investis"] * 100, 2),
                        "jours_catalyseur": jours_avant_catalyseur(p)})
+    reelles, valeur_reelles_eur = valeur_reelles(etat, taux_usd)
     return {
         "lignes": lignes,
         "valeur_lignes_eur": round(total_lignes_eur, 2),
         "cash_eur": cash_disponible(etat),
         "total_eur": round(total_lignes_eur + cash_disponible(etat), 2),
         "pnl_eur": round(total_lignes_eur - sum(p["eur_investis"] for p in etat["positions"]), 2),
+        "reelles": reelles,
+        "valeur_reelles_eur": valeur_reelles_eur,
     }

@@ -88,6 +88,21 @@ def build_report(state, cfg, prices, var_7j, drawdown, fg=None, bio=None):
         lignes += ["", f"Regles : {cfg['biotech']['regle_sortie']} — "
                       f"stop {cfg['biotech']['stop_loss_pct']}% ; "
                       f"watchlist : `data/biotech_watchlist.md`", ""]
+        if bio.get("reelles"):
+            lignes += [
+                "### Positions reelles declarees (hors sleeve papier)",
+                "",
+                f"Valeur : **{bio['valeur_reelles_eur']:.2f} EUR**",
+                "",
+                "| Ticker | Ligne | Valeur | P&L depuis declaration |",
+                "|---|---|---|---|",
+            ]
+            for l in bio["reelles"]:
+                lignes.append(
+                    f"| {l['ticker']} | {l['nom'][:24] or '-'} | {l['valeur_eur']:.2f} EUR "
+                    f"| {l['pnl_eur']:+.2f} EUR ({l['pnl_pct']:+.2f} %) |"
+                )
+            lignes.append("")
 
     lignes += [
         "",
