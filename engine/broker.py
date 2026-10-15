@@ -142,7 +142,14 @@ def attendre_execution(order_id, api_key, user_key, demo=True, essais=6, pause=2
     chemin = (f"/api/v2/trading/info/demo/orders:lookup?orderId={order_id}" if demo
               else f"/api/v2/trading/info/orders:lookup?orderId={order_id}")
     for _ in range(essais):
-        rep = _appel("GET", chemin, api_key, user_key)
+        try:
+            rep = _appel("GET", chemin, api_key, user_key)
+        except ErreurEtoro:
+            # l'ordre est transmis mais le lookup peut 404 (ordres reels en attente) :
+            # le portefeuille (ordersForOpen) fait foi, ne pas interrompre le flux
+            return {"status": "en_file", "orderId": order_id,
+                    "detail": "transmis — vérifiable via /api/v1/trading/info/portfolio "
+                              "(ordersForOpen) ; WaitingForMarket si marché US fermé"}
         st = rep.get("status")
         st_id = st.get("id") if isinstance(st, dict) else st
         if st_id in (3, 5):
