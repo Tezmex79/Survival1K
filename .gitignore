@@ -1,0 +1,18 @@
+# Environnement
+.venv/
+
+# Secrets (jamais de commit de cles API)
+.env
+
+# Donnees generees (etat, rapports) - historique local auditable
+data/
+
+# Depot tiers present dans le dossier de travail (ne pas publier)
+claude-cookbooks/
+
+# Python
+__pycache__/
+*.pyc
+
+# Session ZCode locale
+.zcode/

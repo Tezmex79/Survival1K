@@ -1,0 +1,77 @@
+# =============================================================
+# Système "100 Survival" - configuration de la stratégie
+# Broker cible : eToro (API publique public-api.etoro.com)
+# Tout est modifiable ici, aucun code à toucher.
+# =============================================================
+
+mode: simulation            # simulation | etoro-demo | etoro-real
+                            # etoro-demo/real : ordres via l'API eToro (clés .env requises)
+                            # etoro-real exige en plus le flag --execute (double sécurité)
+
+capital_eur: 100
+allocation:
+  etf_eur: 60              # part manuelle chez eToro (0 commission, suivi automatisé)
+  biotech_eur: 40          # sleeve actions biomedicales a catalyseurs (pilotee par bio.py)
+  crypto_eur: 0            # sleeve crypto en sommeil (moteur conserve, reactivable)
+
+# ---------------------------------------------------------------
+# Sleeve BIOTECH : lignes evenementielles FDA / EMA (CHMP)
+# Principe : volatilite binaire -> micro-positions + sortie systematique
+# apres resolution du catalyseur (quelle que soit l'issue).
+# ---------------------------------------------------------------
+biotech:
+  actif: true
+  max_par_ligne_eur: 10    # eToro : minimum ~10 USD par ordre, et c'est aussi notre plafond
+  max_positions: 4         # 4 x 10 EUR = 40 EUR pleinement deplies
+  frais_pct: 0.0           # actions/ETF eToro : 0 commission (spread non modelise)
+  stop_loss_pct: -30       # sortie anticipee si la ligne decroche avant le catalyseur
+  regle_sortie: "vendre dans les jours qui suivent la resolution du catalyseur (approbation OU refus) — l'evenement est prix dans le titre, on ne s'attache pas"
+  criteres_screening:
+    - "catalyseur FDA (PDUFA/AdComm) ou EMA (CHMP/avis EC) date dans les 2 a 8 prochaines semaines"
+    - "capitalisation > 300 M$ (eviter les microcaps a dilution quasi certaine)"
+    - "titre disponible sur eToro (a verifier avant passage en reel ; sinon fallback XBI)"
+    - "pas plus d'une ligne par meme molecule/indication"
+
+crypto:
+  actif: false             # mise en sommeil : decide() ne genere plus d'ordres
+  split:                   # repartition cible de la sleeve crypto
+    BTC: 0.6
+    ETH: 0.4
+  dca:
+    tranche_eur: 10        # vague hebdomadaire de base
+                            # eToro : minimum 10 USD par ordre — si EUR/USD <= 1.00,
+                            # passer la tranche a 11 EUR
+    semaines: 3            # nombre de vagues programmées (3 x 10 = 30 EUR)
+  dip:
+    reserve_eur: 10        # réserve totale de renfort (1 renfort de 10 EUR)
+    seuil_pct: -12         # déclenchement si variation 7j pondérée <= -12 %
+                           # (retenu après balayage -5/-7/-10/-12 : meilleur pire cas,
+                           #  moyenne équivalente — voir data/backtest_report.md)
+    fenetre_jours: 7
+    tranche_eur: 10        # taille d'un renfort (1 renfort max)
+    cooldown_jours: 3      # jours minimum entre deux renforts
+  frais_pct: 1.0           # commission crypto eToro par ordre (1 %, hors spread ~0,5-1 %)
+  min_ordre_eur: 10        # minimum ~10 USD par ordre sur eToro
+
+etf:
+  ticker: "ETF MSCI World disponible sur eToro (ex. VWCE si proposé, sinon équivalent World)"
+  plateforme: "eToro — 0 commission, minimum ~10 USD, fractions d'ETF"
+  rythme_conseille: "20 EUR x 3 semaines (60 EUR au total), déclaré via --etf"
+
+regles:
+  vente_bloquee_mois: 6    # aucune vente avant 6 mois
+  alerte_drawdown_pct: 25  # alerte dans le rapport au-delà
+
+# Données de marché pour la simulation et l'évaluation (public, sans clé)
+exchange:
+  id: binance
+  paires:                  # paires spot directes en EUR
+    BTC: "BTC/EUR"
+    ETH: "ETH/EUR"
+  taux_usd: "EUR/USDT"     # proxy EUR->USD pour les montants d'ordres eToro
+
+# Broker d'exécution
+etoro:
+  base_url: https://public-api.etoro.com
+  # Auth : x-api-key + x-user-key (Paramètres > Trading > Gestion des clés API,
+  # compte vérifié requis — cf. https://api-portal.etoro.com)
