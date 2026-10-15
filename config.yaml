@@ -4,11 +4,12 @@
 # Tout est modifiable ici, aucun code à toucher.
 # =============================================================
 
-mode: etoro-demo            # simulation | etoro-demo | etoro-real
-                            # ACTUELLEMENT etoro-demo (depuis 15/10/2026) :
-                            # la sleeve biotech passe des ordres MIRROIR sur le
-                            # compte DEMO eToro (argent virtuel) en plus du papier.
-                            # etoro-real : dry-run sauf flag --execute (double sécurité).
+mode: etoro-real            # simulation | etoro-demo | etoro-real
+                            # ACTUELLEMENT etoro-real (depuis 15/10/2026 au soir,
+                            # instruction explicite utilisateur « passe en réel » +
+                            # « lance directement maintenant en premier run manuel ») :
+                            # ordres REELS mais --execute requis sur chaque commande
+                            # (double sécurité). Financement : vente 200 EUR Medincell.
 
 capital_eur: 100
 allocation:

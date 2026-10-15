@@ -115,41 +115,21 @@ def annuler_ordre(order_id, api_key, user_key, demo=True):
 def position_ouverte(instrument_id, api_key, user_key, demo=True):
     """Cherche la position ouverte d'un instrument dans le portefeuille.
 
-    Retourne {'positionId': ..., 'units': ...} ou None si non trouvee.
-    Parsing defensif : le schema exact du snapshot varie, on cherche
-    recursivement instrumentId/positionId dans la reponse JSON.
+    Endpoint reel confirme : GET /api/v1/trading/info/portfolio
+    (champs 'positionID', 'instrumentID', 'units' — ID en majuscules).
+    Retourne la PLUS GROSSE ligne de cet instrument :
+    {'positionId': ..., 'units': ...} ou None si non trouvee.
     """
-    chemins = (["/api/v2/trading/info/demo/portfolio/aggregated-snapshot",
-                "/api/v2/trading/info/portfolio/aggregated-snapshot"] if demo
-              else ["/api/v2/trading/info/portfolio/aggregated-snapshot",
-                    "/api/v2/trading/portfolio/aggregated-snapshot"])
-    rep = None
-    for chemin in chemins:
-        try:
-            rep = _appel("POST", chemin, api_key, user_key, {})
-            break
-        except ErreurEtoro:
-            continue
-    if rep is None:
-        raise ErreurEtoro("Endpoint portefeuille introuvable — chemins essayes : "
-                          + ", ".join(chemins))
-
-    def cherche(noeud):
-        if isinstance(noeud, dict):
-            if noeud.get("instrumentId") == int(instrument_id) and noeud.get("positionId"):
-                return {"positionId": noeud["positionId"], "units": noeud.get("units")}
-            for v in noeud.values():
-                r = cherche(v)
-                if r:
-                    return r
-        elif isinstance(noeud, list):
-            for v in noeud:
-                r = cherche(v)
-                if r:
-                    return r
+    rep = _appel("GET", "/api/v1/trading/info/portfolio", api_key, user_key)
+    positions = rep.get("clientPortfolio", {}).get("positions", [])
+    lignes = [p for p in positions
+              if int(p.get("instrumentID", -1)) == int(instrument_id)]
+    if not lignes:
         return None
-
-    return cherche(rep)
+    p = max(lignes, key=lambda x: x.get("units", 0))
+    return {"positionId": p["positionID"], "units": p.get("units", 0),
+            "lignes": [{"positionId": q["positionID"], "units": q.get("units", 0),
+                        "openRate": q.get("openRate")} for q in lignes]}
 
 
 def attendre_execution(order_id, api_key, user_key, demo=True, essais=6, pause=2.0):

@@ -26,9 +26,13 @@ sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
 import yaml
 
+from dotenv import load_dotenv
+
 from engine import biotech
 from engine import broker
 from engine import prices
+
+load_dotenv(biotech.BASE / ".env")
 
 
 def taux_usd(cfg):
@@ -84,6 +88,10 @@ def main():
     p_buy.add_argument("--nom", default="")
     p_buy.add_argument("--etoro", default=None, dest="symbole_etoro",
                        help="symbole eToro si different (ex. MEDCL.PA)")
+    p_ren = sub.add_parser("renforcer", help="renfort d'une ligne existante (papier + eToro selon mode)")
+    p_ren.add_argument("ticker")
+    p_ren.add_argument("eur", type=float)
+    p_ren.add_argument("--etoro", default=None, dest="symbole_etoro")
     p_sell = sub.add_parser("sell", help="vente d'une ligne")
     p_sell.add_argument("ticker")
     p_sell.add_argument("raison", nargs="?", default="sortie manuelle")
@@ -143,6 +151,47 @@ def main():
         biotech.sauver(etat)
         print(f"Achat : {p['qty']} {ticker} @ {prix} USD ({args.eur} EUR, taux {t:.4f}) "
               f"— catalyseur {args.catalyseur} le {args.date_catalyseur}")
+        return
+
+    if args.cmd == "renforcer":
+        ticker = args.ticker.upper()
+        pos = next((p for p in etat["positions"] if p["ticker"] == ticker), None)
+        if not pos:
+            raise SystemExit(f"{ticker} n'est pas en portefeuille (utiliser buy)")
+        cours = biotech.cours_usd([ticker])
+        prix = cours.get(ticker.lower(), {}).get("close")
+        if not prix:
+            raise SystemExit(f"Cours introuvable pour {ticker}")
+        delta = round(pos["eur_investis"] + args.eur - float(regles["max_par_ligne_eur"]), 2)
+        if delta > 0.005:
+            raise SystemExit(f"Refus : la ligne atteindrait {pos['eur_investis'] + args.eur:.2f} EUR "
+                             f"> plafond {regles['max_par_ligne_eur']} EUR")
+        if args.eur > biotech.cash_disponible(etat):
+            raise SystemExit(f"Refus : cash {biotech.cash_disponible(etat)} EUR < {args.eur} EUR")
+
+        ordre = {"ticker": ticker, "eur": args.eur, "symbole_etoro": args.symbole_etoro or pos.get("symbole_etoro", ticker)}
+        etoro_info = None
+        if mode == "etoro-real" and not args.execute:
+            print(f"MODE etoro-real SANS --execute : dry-run. (simule) renfort {args.eur:.2f} EUR {ticker} @ {prix} USD")
+            return
+        if mode.startswith("etoro"):
+            etoro_info = _executer_achat_etoro(cfg, ordre, api_key, user_key,
+                                               demo=(mode == "etoro-demo"), taux=t)
+            print(f"Ordre eToro [{'DEMO' if mode == 'etoro-demo' else 'REEL'}] : "
+                  f"{etoro_info['montant_usd']} USD -> {ticker}, statut {etoro_info['status']}")
+
+        montant_usd = args.eur * t
+        qty = round(montant_usd / prix, 4)
+        pos["qty"] = round(pos["qty"] + qty, 4)
+        pos["eur_investis"] = round(pos["eur_investis"] + args.eur, 2)
+        if etoro_info:
+            pos.setdefault("etoro", {}).update(etoro_info)
+        etat["journal"].append({"date": biotech.now_iso(), "action": "renfort",
+                                "ticker": ticker, "eur": round(args.eur, 2),
+                                "prix_usd": prix, "qty": qty})
+        biotech.sauver(etat)
+        print(f"Renfort : +{qty} {ticker} @ {prix} USD ({args.eur} EUR) — "
+              f"ligne {pos['eur_investis']:.2f} EUR au total")
         return
 
     if args.cmd == "sell":
