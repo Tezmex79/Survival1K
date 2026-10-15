@@ -4,9 +4,11 @@
 # Tout est modifiable ici, aucun code à toucher.
 # =============================================================
 
-mode: simulation            # simulation | etoro-demo | etoro-real
-                            # etoro-demo/real : ordres via l'API eToro (clés .env requises)
-                            # etoro-real exige en plus le flag --execute (double sécurité)
+mode: etoro-demo            # simulation | etoro-demo | etoro-real
+                            # ACTUELLEMENT etoro-demo (depuis 15/10/2026) :
+                            # la sleeve biotech passe des ordres MIRROIR sur le
+                            # compte DEMO eToro (argent virtuel) en plus du papier.
+                            # etoro-real : dry-run sauf flag --execute (double sécurité).
 
 capital_eur: 100
 allocation:
@@ -73,5 +75,12 @@ exchange:
 # Broker d'exécution
 etoro:
   base_url: https://public-api.etoro.com
+  # Positions réelles PROTÉGÉES : jamais vendues automatiquement ; la commande
+  # `bio.py liquider` agit sur le compte RÉEL avec --execute et plafond cumulé.
+  protection_positions_reelles:
+    MEDCL.PA:
+      symbole_etoro: MEDCL.PA
+      vente_max_eur_cumulee: 200   # autorisation utilisateur 15/10/2026 : max 200 EUR
+                                   # cumulés, uniquement pour financer la sleeve biotech
   # Auth : x-api-key + x-user-key (Paramètres > Trading > Gestion des clés API,
   # compte vérifié requis — cf. https://api-portal.etoro.com)

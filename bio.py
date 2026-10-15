@@ -1,16 +1,24 @@
-"""CLI de la sleeve biotech : lignes evenementielles FDA/EMA (portefeuille papier).
+"""CLI de la sleeve biotech : lignes evenementielles FDA/EMA.
 
 Usage :
     python bio.py                                        # statut + valeur de la sleeve
     python bio.py buy CRSP 10 "PDUFA exa-cel" 2026-12-16 --nom "CRISPR Therapeutics"
-    python bio.py sell CRSP "catalyseur resolu : approbation"
-    python bio.py journal                                # historique des operations
+    python bio.py sell CRSP "catalyseur resolu"
+    python bio.py check                                  # radar : alertes stop-loss/catalyseurs
+    python bio.py liquider MEDCL.PA 40 --execute         # vente partielle d'une position reelle
+    python bio.py journal                                # historique
 
-Les cours viennent de Stooq (US, USD) ; la conversion EUR/USD du jour vient de
-Binance EUR/USDT. Regles (config.yaml > biotech) appliquees : max par ligne,
-max positions, cash disponible.
+Execution selon config.yaml > mode :
+    simulation  -> portefeuille papier uniquement
+    etoro-demo  -> papier + ordres MIRROIR sur le compte DEMO eToro
+    etoro-real  -> papier + ordres REELS, mais seulement avec le flag --execute
+
+Positions reelles protegees (config.yaml > etoro.protection_positions_reelles) :
+    jamais vendues automatiquement ; `liquider` agit sur le compte REEL avec
+    plafond cumule verifie, et exige --execute.
 """
 import argparse
+import os
 import sys
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -19,6 +27,7 @@ sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 import yaml
 
 from engine import biotech
+from engine import broker
 from engine import prices
 
 
@@ -27,36 +36,79 @@ def taux_usd(cfg):
     return float(ex.fetch_ticker(cfg["exchange"]["taux_usd"])["last"])
 
 
+def _cles_etoro():
+    return os.getenv("ETORO_API_KEY"), os.getenv("ETORO_USER_KEY")
+
+
+def _chercher_cle(obj, cle):
+    """Cherche recursivement une cle dans la reponse JSON eToro (schema variable)."""
+    if isinstance(obj, dict):
+        if cle in obj and obj[cle] is not None:
+            return obj[cle]
+        for v in obj.values():
+            r = _chercher_cle(v, cle)
+            if r is not None:
+                return r
+    elif isinstance(obj, list):
+        for v in obj:
+            r = _chercher_cle(v, cle)
+            if r is not None:
+                return r
+    return None
+
+
+def _executer_achat_etoro(cfg, o, api_key, user_key, demo, taux):
+    """Passe l'ordre achat sur eToro, attend l'execution, retourne les infos."""
+    symbole_etoro = o.get("symbole_etoro", o["ticker"])
+    inst = broker.resoudre_instrument(symbole_etoro, api_key, user_key)
+    montant_usd = o["eur"] * taux
+    rep = broker.acheter_marche(inst, montant_usd, api_key, user_key, demo=demo)
+    final = broker.attendre_execution(rep.get("orderId"), api_key, user_key, demo=demo)
+    position_id = _chercher_cle(final, "positionId")
+    return {"orderId": rep.get("orderId"), "referenceId": rep.get("referenceId"),
+            "status": final.get("status"), "positionId": position_id,
+            "montant_usd": round(montant_usd, 2), "compte": "demo" if demo else "reel"}
+
+
 def main():
     parser = argparse.ArgumentParser(description="Sleeve biotech 100 Survival")
+    parser.add_argument("--execute", action="store_true",
+                        help="autoriser les ordres REELS eToro (etoro-real / liquider)")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("status", help="statut de la sleeve (defaut)")
-    p_buy = sub.add_parser("buy", help="achat papier d'une ligne evenementielle")
+    p_buy = sub.add_parser("buy", help="achat d'une ligne evenementielle")
     p_buy.add_argument("ticker")
     p_buy.add_argument("eur", type=float)
     p_buy.add_argument("catalyseur")
     p_buy.add_argument("date_catalyseur", help="AAAA-MM-JJ")
     p_buy.add_argument("--nom", default="")
-    p_sell = sub.add_parser("sell", help="vente papier d'une ligne")
+    p_buy.add_argument("--etoro", default=None, dest="symbole_etoro",
+                       help="symbole eToro si different (ex. MEDCL.PA)")
+    p_sell = sub.add_parser("sell", help="vente d'une ligne")
     p_sell.add_argument("ticker")
     p_sell.add_argument("raison", nargs="?", default="sortie manuelle")
     sub.add_parser("journal", help="historique des operations")
     sub.add_parser("check", help="controle radar : alertes stop-loss et catalyseurs")
     p_track = sub.add_parser("track", help="declarer une position REELLE detenue hors papier")
-    p_track.add_argument("ticker", help="symbole Yahoo, ex. MEDIC.PA")
+    p_track.add_argument("ticker", help="symbole Yahoo, ex. MEDCL.PA")
     p_track.add_argument("montant_eur", type=float)
     p_track.add_argument("--nom", default="")
     p_track.add_argument("--note", default="")
     p_untrack = sub.add_parser("untrack", help="retirer une position reelle declaree")
     p_untrack.add_argument("ticker")
+    p_liq = sub.add_parser("liquider", help="vente partielle d'une position reelle PROTEGEE (reel, --execute requis)")
+    p_liq.add_argument("ticker")
+    p_liq.add_argument("montant_eur", type=float)
     args = parser.parse_args()
     if not args.cmd:
         args.cmd = "status"
 
     cfg = yaml.safe_load(open(biotech.BASE / "config.yaml", encoding="utf-8"))
     regles = cfg["biotech"]
+    mode = cfg.get("mode", "simulation")
     etat = biotech.charger(cfg)
     t = taux_usd(cfg)
+    api_key, user_key = _cles_etoro()
 
     if args.cmd == "buy":
         ticker = args.ticker.upper()
@@ -70,23 +122,100 @@ def main():
             raise SystemExit(f"Refus : nombre max de positions atteint ({regles['max_positions']})")
         if args.eur > biotech.cash_disponible(etat):
             raise SystemExit(f"Refus : cash restant {biotech.cash_disponible(etat)} EUR < {args.eur} EUR")
+
+        ordre = {"ticker": ticker, "eur": args.eur, "symbole_etoro": args.symbole_etoro or ticker}
+        etoro_info = None
+        if mode == "etoro-real" and not args.execute:
+            print(f"MODE etoro-real SANS --execute : dry-run, rien n'est transmis.")
+            print(f"  (simule) achat {args.eur:.2f} EUR {ticker} @ {prix} USD — {args.catalyseur} ({args.date_catalyseur})")
+            return
+        if mode.startswith("etoro"):
+            etoro_info = _executer_achat_etoro(cfg, ordre, api_key, user_key,
+                                               demo=(mode == "etoro-demo"), taux=t)
+            print(f"Ordre eToro [{'DEMO' if mode == 'etoro-demo' else 'REEL'}] : "
+                  f"{etoro_info['montant_usd']} USD -> {ticker}, statut {etoro_info['status']}")
+
         p = biotech.acheter(etat, ticker, args.eur, t, prix, args.catalyseur,
                             args.date_catalyseur, args.nom)
+        p["symbole_etoro"] = ordre["symbole_etoro"]
+        if etoro_info:
+            p["etoro"] = etoro_info
         biotech.sauver(etat)
-        print(f"Achat papier : {p['qty']} {ticker} @ {prix} USD "
-              f"({args.eur} EUR, taux {t:.4f}) — catalyseur {args.catalyseur} le {args.date_catalyseur}")
+        print(f"Achat : {p['qty']} {ticker} @ {prix} USD ({args.eur} EUR, taux {t:.4f}) "
+              f"— catalyseur {args.catalyseur} le {args.date_catalyseur}")
         return
 
     if args.cmd == "sell":
         ticker = args.ticker.upper()
+        pos = next((p for p in etat["positions"] if p["ticker"] == ticker), None)
+        if not pos:
+            raise SystemExit(f"{ticker} n'est pas en portefeuille")
         cours = biotech.cours_usd([ticker])
         prix = cours.get(ticker.lower(), {}).get("close")
         if not prix:
             raise SystemExit(f"Cours introuvable pour {ticker}")
+
+        if mode == "etoro-real" and not args.execute:
+            print(f"MODE etoro-real SANS --execute : dry-run, rien n'est transmis.")
+            print(f"  (simule) vente {ticker} @ {prix} USD — {args.raison}")
+            return
+        if mode.startswith("etoro") and pos.get("etoro"):
+            e = pos["etoro"]
+            demo = mode == "etoro-demo"
+            position_id = e.get("positionId")
+            inst = broker.resoudre_instrument(pos.get("symbole_etoro", ticker), api_key, user_key)
+            if not position_id:
+                trouve = broker.position_ouverte(inst, api_key, user_key, demo=demo)
+                position_id = trouve and trouve["positionId"]
+            if position_id:
+                rep = broker.vendre_marche(position_id, inst, None, api_key, user_key, demo=demo)
+                print(f"Vente eToro [{'DEMO' if demo else 'REEL'}] transmise "
+                      f"(position {position_id}) : {str(rep)[:140]}")
+            else:
+                print(f"ATTENTION : positionId eToro introuvable pour {ticker} — "
+                      f"cloturer manuellement sur l'app, la ligne papier est soldée.")
+
         ligne = biotech.vendre(etat, ticker, t, prix, args.raison)
         biotech.sauver(etat)
-        print(f"Vente papier {ticker} @ {prix} USD — P&L {ligne['pnl_eur']:+.2f} EUR "
-              f"({ligne['raison_sortie']})")
+        print(f"Vente {ticker} @ {prix} USD — P&L {ligne['pnl_eur']:+.2f} EUR ({ligne['raison_sortie']})")
+        return
+
+    if args.cmd == "liquider":
+        # Vente partielle d'une position reelle PROTEGEE : compte REEL + --execute + plafond cumule
+        ticker = args.ticker.upper()
+        protection = cfg.get("etoro", {}).get("protection_positions_reelles", {}).get(ticker)
+        if not protection:
+            raise SystemExit(f"{ticker} n'est pas une position protegee declaree dans config.yaml")
+        plafond = float(protection["vente_max_eur_cumulee"])
+        deja_vendu = etat.setdefault("ventes_reelles", {}).get(ticker, 0.0)
+        if deja_vendu + args.montant_eur > plafond:
+            raise SystemExit(f"REFUS : plafond {plafond} EUR — deja vendu {deja_vendu:.2f} EUR, "
+                             f"demande {args.montant_eur:.2f} EUR")
+        cours = biotech.cours_usd([ticker])
+        c = cours.get(ticker.lower())
+        if not c:
+            raise SystemExit(f"Cours introuvable pour {ticker}")
+        cours_eur = c["close"] / biotech.taux_si_usd(c.get("devise", "EUR"), t)
+        unites = round(args.montant_eur / cours_eur, 4)
+        if not args.execute:
+            print(f"DRY-RUN (compte REEL, --execute requis) : vendre {unites} {ticker} "
+                  f"~{args.montant_eur:.2f} EUR @ {cours_eur:.2f} EUR "
+                  f"[cumul apres: {deja_vendu + args.montant_eur:.2f}/{plafond} EUR]")
+            return
+        inst = broker.resoudre_instrument(protection.get("symbole_etoro", ticker), api_key, user_key)
+        pos = broker.position_ouverte(inst, api_key, user_key, demo=False)
+        if not pos:
+            raise SystemExit(f"Position ouverte {ticker} introuvable sur le compte REEL eToro")
+        if pos["units"] and unites > pos["units"]:
+            unites = pos["units"]
+        rep = broker.vendre_marche(pos["positionId"], inst, unites, api_key, user_key, demo=False)
+        etat["ventes_reelles"][ticker] = round(deja_vendu + args.montant_eur, 2)
+        etat["journal"].append({"date": biotech.now_iso(), "action": "liquider",
+                                "ticker": ticker, "eur": args.montant_eur,
+                                "unites": unites, "reponse": str(rep)[:200]})
+        biotech.sauver(etat)
+        print(f"Vente partielle REELLE transmise : {unites} {ticker} (~{args.montant_eur:.2f} EUR) "
+              f"[cumul {etat['ventes_reelles'][ticker]}/{plafond} EUR] — {str(rep)[:120]}")
         return
 
     if args.cmd == "track":
@@ -94,14 +223,13 @@ def main():
         cours = biotech.cours_usd([ticker])
         c = cours.get(ticker.lower())
         if not c:
-            raise SystemExit(f"Cours introuvable pour {ticker} (symbole Yahoo attendu, ex. MEDIC.PA)")
+            raise SystemExit(f"Cours introuvable pour {ticker} (symbole Yahoo attendu, ex. MEDCL.PA)")
         p = biotech.suivre_reelle(etat, ticker, args.montant_eur, c["close"],
                                   c.get("devise", ""), t, args.nom, args.note)
         biotech.sauver(etat)
-        print(f"Position reelle declaree : {p['qty']} {ticker} "
-              f"({args.montant_eur:.2f} EUR, cours {c['close']} {c.get('devise')}) — "
-              f"le P&L est suivi a partir de la declaration ; donner la quantite exacte "
-              f"eToro plus tard pour affiner la base")
+        print(f"Position reelle declaree : {p['qty']} {ticker} ({args.montant_eur:.2f} EUR, "
+              f"cours {c['close']} {c.get('devise')}) — donner la quantite exacte eToro "
+              f"plus tard pour affiner la base")
         return
 
     if args.cmd == "untrack":
@@ -126,10 +254,9 @@ def main():
                 alertes.append(f"CATALYSEUR ECHU {l['ticker']} ({l['date_catalyseur']}) "
                                f"-> verifier l'issue puis VENDRE")
             elif jc is not None and jc <= 2:
-                alertes.append(f"IMMINENT {l['ticker']} : catalyseur {l['date_catalyseur']} "
-                               f"(J{jc}) -> surveiller")
-        print(f"Radar biotech : {len(v['lignes'])} ligne(s), P&L ouvert "
-              f"{v['pnl_eur']:+.2f} EUR, cash {v['cash_eur']:.2f} EUR")
+                alertes.append(f"IMMINENT {l['ticker']} : catalyseur {l['date_catalyseur']} (J{jc})")
+        print(f"Radar biotech : {len(v['lignes'])} ligne(s), P&L ouvert {v['pnl_eur']:+.2f} EUR, "
+              f"cash {v['cash_eur']:.2f} EUR, mode {mode}")
         for l in v["lignes"]:
             jc = l["jours_catalyseur"]
             print(f"  {l['ticker']:<6} {l['pnl_pct']:+7.2f}%  catalyseur J{jc if jc is not None else '?'}")
@@ -143,26 +270,31 @@ def main():
 
     if args.cmd == "journal":
         for e in etat["journal"][-20:]:
-            print(f"{e['date'][:16]} {e['action']:>6} {e['ticker']:<6} {e}")
+            print(f"{e['date'][:16]} {e['action']:>8} {e.get('ticker', ''):<9} {e.get('eur', '')} EUR")
         return
 
     v = biotech.valeur(etat, t)
-    print(f"Sleeve biotech : {v['total_eur']:.2f} EUR "
-          f"(lignes {v['valeur_lignes_eur']:.2f} + cash {v['cash_eur']:.2f}) | "
-          f"P&L ouvert {v['pnl_eur']:+.2f} EUR | taux EUR/USD {t:.4f}")
+    print(f"Sleeve biotech : {v['total_eur']:.2f} EUR (lignes {v['valeur_lignes_eur']:.2f} "
+          f"+ cash {v['cash_eur']:.2f}) | P&L ouvert {v['pnl_eur']:+.2f} EUR | "
+          f"taux EUR/USD {t:.4f} | mode {mode}")
     if not v["lignes"]:
         print("Aucune ligne ouverte. Watchlist : data/biotech_watchlist.md")
     for l in v["lignes"]:
         jc = l["jours_catalyseur"]
         jc_txt = f"{jc} j" if jc is not None else "n/d"
-        print(f"  {l['ticker']:<6} {l['nom'][:28]:<28} {l['valeur_eur']:>6.2f} EUR "
-              f"({l['pnl_eur']:+5.2f} / {l['pnl_pct']:+6.2f} %) | catalyseur: "
-              f"{l['catalyseur']} ({l['date_catalyseur']}, J{jc_txt})")
+        eto = " [eToro demo]" if l.get("etoro", {}).get("compte") == "demo" else \
+              (" [eToro REEL]" if l.get("etoro") else "")
+        print(f"  {l['ticker']:<6} {l['nom'][:24]:<24} {l['valeur_eur']:>6.2f} EUR "
+              f"({l['pnl_pct']:+6.2f} %) | {l['catalyseur']} ({l['date_catalyseur']}, J{jc_txt}){eto}")
     if v.get("reelles"):
+        plafonds = cfg.get("etoro", {}).get("protection_positions_reelles", {})
         print(f"Positions reelles declarees : {v['valeur_reelles_eur']:.2f} EUR")
         for l in v["reelles"]:
-            print(f"  {l['ticker']:<9} {l['nom'][:26]:<26} {l['valeur_eur']:>8.2f} EUR "
-                  f"({l['pnl_eur']:+7.2f} / {l['pnl_pct']:+6.2f} % depuis declaration)")
+            prot = plafonds.get(l["ticker"])
+            cap = (f", protection {prot['vente_max_eur_cumulee']} EUR "
+                   f"(vendu {etat.get('ventes_reelles', {}).get(l['ticker'], 0):.2f})") if prot else ""
+            print(f"  {l['ticker']:<9} {l['nom'][:24]:<24} {l['valeur_eur']:>8.2f} EUR "
+                  f"({l['pnl_pct']:+6.2f} % depuis declaration){cap}")
 
 
 if __name__ == "__main__":

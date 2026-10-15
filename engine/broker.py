@@ -93,16 +93,83 @@ def acheter_marche(instrument_id, montant_usd, api_key, user_key, demo=True):
     return _appel("POST", chemin, api_key, user_key, corps)
 
 
-def attendre_execution(order_id, api_key, user_key, essais=6, pause=2.0):
-    """Interroge orders:lookup — statut 3/5 = exécuté, 4/10 = rejeté, sinon en cours."""
+def vendre_marche(position_id, instrument_id, unites, api_key, user_key, demo=True):
+    """Cloture (totale si unites=None, partielle sinon) une position ouverte.
+
+    POST /api/v1/trading/execution/market-close-orders/positions/{positionId}
+    """
+    chemin = ("/api/v1/trading/execution/demo/market-close-orders/positions/"
+              f"{position_id}" if demo else
+              f"/api/v1/trading/execution/market-close-orders/positions/{position_id}")
+    corps = {"InstrumentId": int(instrument_id), "UnitsToDeduct": unites}
+    return _appel("POST", chemin, api_key, user_key, corps)
+
+
+def annuler_ordre(order_id, api_key, user_key, demo=True):
+    """Annule un ordre en attente (avant execution)."""
+    chemin = (f"/api/v2/trading/execution/demo/orders/{order_id}" if demo
+              else f"/api/v2/trading/execution/orders/{order_id}")
+    return _appel("DELETE", chemin, api_key, user_key)
+
+
+def position_ouverte(instrument_id, api_key, user_key, demo=True):
+    """Cherche la position ouverte d'un instrument dans le portefeuille.
+
+    Retourne {'positionId': ..., 'units': ...} ou None si non trouvee.
+    Parsing defensif : le schema exact du snapshot varie, on cherche
+    recursivement instrumentId/positionId dans la reponse JSON.
+    """
+    chemins = (["/api/v2/trading/info/demo/portfolio/aggregated-snapshot",
+                "/api/v2/trading/info/portfolio/aggregated-snapshot"] if demo
+              else ["/api/v2/trading/info/portfolio/aggregated-snapshot",
+                    "/api/v2/trading/portfolio/aggregated-snapshot"])
+    rep = None
+    for chemin in chemins:
+        try:
+            rep = _appel("POST", chemin, api_key, user_key, {})
+            break
+        except ErreurEtoro:
+            continue
+    if rep is None:
+        raise ErreurEtoro("Endpoint portefeuille introuvable — chemins essayes : "
+                          + ", ".join(chemins))
+
+    def cherche(noeud):
+        if isinstance(noeud, dict):
+            if noeud.get("instrumentId") == int(instrument_id) and noeud.get("positionId"):
+                return {"positionId": noeud["positionId"], "units": noeud.get("units")}
+            for v in noeud.values():
+                r = cherche(v)
+                if r:
+                    return r
+        elif isinstance(noeud, list):
+            for v in noeud:
+                r = cherche(v)
+                if r:
+                    return r
+        return None
+
+    return cherche(rep)
+
+
+def attendre_execution(order_id, api_key, user_key, demo=True, essais=6, pause=2.0):
+    """Interroge orders:lookup — statut 3/5 = execute, 4/10 = rejete, sinon en cours.
+
+    Le statut est un objet {'id': N, 'name': ...}. Apres execution, le positionId
+    se trouve dans 'positionExecutions'. Note : hors seance US, un ordre au marche
+    reste longtemps en 'WaitingForMarket'.
+    """
+    chemin = (f"/api/v2/trading/info/demo/orders:lookup?orderId={order_id}" if demo
+              else f"/api/v2/trading/info/orders:lookup?orderId={order_id}")
     for _ in range(essais):
-        rep = _appel("GET", f"/api/v2/trading/info/orders:lookup?orderId={order_id}",
-                     api_key, user_key)
+        rep = _appel("GET", chemin, api_key, user_key)
         st = rep.get("status")
-        if st in (3, 5):
+        st_id = st.get("id") if isinstance(st, dict) else st
+        if st_id in (3, 5):
             return rep
-        if st in (4, 10):
-            raise ErreurEtoro(f"Ordre {order_id} rejeté par eToro : {rep}")
+        if st_id in (4, 10):
+            raise ErreurEtoro(f"Ordre {order_id} rejete par eToro : {rep}")
         time.sleep(pause)
     return {"status": "en_cours", "orderId": order_id,
-            "detail": "délai dépassé — vérifier la position sur eToro"}
+            "detail": "delai depasse (ou marche ferme — WaitingForMarket) : "
+                      "verifier la position sur eToro"}
