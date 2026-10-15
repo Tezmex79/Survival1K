@@ -26,6 +26,11 @@ def _headers(api_key, user_key):
         "x-request-id": str(uuid.uuid4()),  # idempotence, exigé par l'API
         "Content-Type": "application/json",
         "Accept": "application/json",
+        # Cloudflare (Error 1010) bloque l'User-Agent par defaut de Python urllib :
+        # signature navigateur requise meme pour un client API legitime.
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                       "AppleWebKit/537.36 (KHTML, like Gecko) "
+                       "Chrome/129.0.0.0 Safari/537.36"),
     }
 
 
