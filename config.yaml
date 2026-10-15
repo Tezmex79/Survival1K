@@ -33,7 +33,14 @@ biotech:
   frais_pct: 0.0           # actions/ETF eToro : 0 commission (spread non modelise)
   stop_loss_pct: -30       # sortie anticipee si la ligne decroche avant le catalyseur
   regle_sortie: "vendre dans les jours qui suivent la resolution du catalyseur (approbation OU refus) — l'evenement est prix dans le titre, on ne s'attache pas"
-  rythme_deploiement: "1 à 2 nouvelles lignes par lundi de screening selon les candidats qualifiés — déployer 180 EUR restants prend typiquement 6 à 10 semaines ; ne jamais forcer un achat sans catalyseur daté"
+  rythme_deploiement: "objectif 140-150 EUR de lignes au premier run d'achats (renforts BBIO/COGT à 20 EUR + nouvelles lignes 20 EUR), puis complétion les lundis suivants selon candidats ; ne jamais forcer un achat sans catalyseur daté"
+  treso_opportunite_eur: 50   # trésorerie tactique (instruction utilisateur 15/10/2026) :
+                              # frappes HORS lundi, déclenchées par un fait précis —
+                              # max 20 EUR par frappe, 50 EUR cumulés, journal obligatoire
+  declencheurs_treso:
+    - "avis CHMP positif rendu public (achat avant la décision CE ~2 mois plus tard)"
+    - "repli >= 10% d'un titre de la watchlist ou du portefeuille à 10 jours ou moins de son catalyseur"
+    - "AdComm imprévu se terminant par un vote positif"
   criteres_screening:
     - "catalyseur FDA (PDUFA/AdComm) ou EMA (CHMP/avis EC) date dans les 2 a 8 prochaines semaines"
     - "capitalisation > 300 M$ (eviter les microcaps a dilution quasi certaine)"
