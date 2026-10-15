@@ -12,7 +12,8 @@ mode: etoro-demo            # simulation | etoro-demo | etoro-real
 
 capital_eur: 100
 allocation:
-  etf_eur: 60              # part manuelle chez eToro (0 commission, suivi automatisé)
+  etf_eur: 0              # part ETF ABANDONNÉE (décision utilisateur 15/10/2026 :
+                          # pas d'investissement manuel) — réactivable si changement d'avis
   biotech_eur: 200         # sleeve biotech (décision utilisateur 15/10/2026 : passage
                            # de 40 à 200 EUR ; en réel, financée par la vente de 200 EUR
                            # de Medincell au moment du basculement en réel)
