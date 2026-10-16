@@ -292,8 +292,10 @@ def main():
         return
 
     if args.cmd == "check":
+        from datetime import datetime
         v = biotech.valeur(etat, t)
         alertes = []
+        maintenant = datetime.now().strftime("%Y-%m-%d %H:%M (%A)")
         for l in v["lignes"]:
             if l["pnl_pct"] <= float(regles["stop_loss_pct"]):
                 alertes.append(f"STOP-LOSS {l['ticker']} : {l['pnl_pct']:+.2f}% "
@@ -303,9 +305,9 @@ def main():
                 alertes.append(f"CATALYSEUR ECHU {l['ticker']} ({l['date_catalyseur']}) "
                                f"-> verifier l'issue puis VENDRE")
             elif jc is not None and jc <= 2:
-                alertes.append(f"IMMINENT {l['ticker']} : catalyseur {l['date_catalyseur']} (J{jc})")
-        print(f"Radar biotech : {len(v['lignes'])} ligne(s), P&L ouvert {v['pnl_eur']:+.2f} EUR, "
-              f"cash {v['cash_eur']:.2f} EUR, mode {mode}")
+                alertes.append(f"IMMINENT {l['ticker']} : catalyseur {l['date_catalyseur']} (J{jc}) -> surveiller")
+        print(f"Radar biotech le {maintenant} : {len(v['lignes'])} ligne(s), "
+              f"P&L ouvert {v['pnl_eur']:+.2f} EUR, cash {v['cash_eur']:.2f} EUR, mode {mode}")
         for l in v["lignes"]:
             jc = l["jours_catalyseur"]
             print(f"  {l['ticker']:<6} {l['pnl_pct']:+7.2f}%  catalyseur J{jc if jc is not None else '?'}")
