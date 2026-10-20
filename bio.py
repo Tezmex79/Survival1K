@@ -308,7 +308,7 @@ def main():
                 alertes.append(f"IMMINENT {l['ticker']} : catalyseur {l['date_catalyseur']} (J{jc}) -> surveiller")
         print(f"Radar biotech le {maintenant} : {len(v['lignes'])} ligne(s), "
               f"P&L ouvert {v['pnl_eur']:+.2f} EUR, cash {v['cash_eur']:.2f} EUR, mode {mode}")
-        print(f"{'Ticker':<7}{'Qty':>8}{'PRU $':>9}{'Cours $':>9}{'Valeur €':>9}"
+        print(f"{'Ticker':<7}{'Qty':>8}{'PRU':>9}{'Cours':>9}{'Valeur €':>9}"
               f"{'P&L €':>8}{'P&L %':>8}  Catalyseur")
         for l in v["lignes"]:
             jc = l["jours_catalyseur"]
@@ -320,8 +320,16 @@ def main():
         print(f"{'TOTAL':<7}{'' :>8}{'' :>9}{'' :>9}{v['total_eur']:>9.2f}"
               f"{v['pnl_eur']:>+8.2f}")
         for l in v.get("reelles", []):
-            print(f"Position réelle : {l['ticker']} {l['qty']} u — "
-                  f"{l['valeur_eur']:.2f} EUR ({l['pnl_pct']:+.2f} % depuis déclaration)")
+            pru = l["montant_declare_eur"] / l["qty"] if l["qty"] else 0.0
+            cours = l.get("cours") or l["prix_declaration"]
+            devise = "€" if (l.get("devise_cours") == "EUR" or l["devise"] == "EUR") else "$"
+            print(f"{l['ticker'] + '*':<7}{l['qty']:>8.4f}{pru:>8.2f}{devise}"
+                  f"{cours:>9.2f}{l['valeur_eur']:>9.2f}{l['pnl_eur']:>+8.2f}"
+                  f"{l['pnl_pct']:>+7.2f}%  réelle, protégée (CHMP ~2027)")
+            print(f"{'PATR. SUIVI':<12}{'' :>4}{'' :>9}{'' :>9}"
+                  f"{v['total_eur'] + v['valeur_reelles_eur']:>9.2f}"
+                  f"{v['pnl_eur'] + sum(r['pnl_eur'] for r in v['reelles']):>+8.2f}")
+        print("* position réelle hors sleeve (MEDCL.PA), jamais vendue automatiquement")
         if alertes:
             print("ALERTES :")
             for a in alertes:
