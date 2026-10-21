@@ -78,6 +78,9 @@ def main():
     parser = argparse.ArgumentParser(description="Sleeve biotech 100 Survival")
     parser.add_argument("--execute", action="store_true",
                         help="autoriser les ordres REELS eToro (etoro-real / liquider)")
+    parser.add_argument("--local", action="store_true",
+                        help="check local (tache Windows de reveil) : ne met PAS a jour "
+                             "last_radar.txt pour ne pas supprimer le radar de l'agent")
     sub = parser.add_subparsers(dest="cmd")
     sub.add_parser("status", help="statut de la sleeve (defaut)")
     p_buy = sub.add_parser("buy", help="achat d'une ligne evenementielle")
@@ -308,6 +311,9 @@ def main():
                 alertes.append(f"IMMINENT {l['ticker']} : catalyseur {l['date_catalyseur']} (J{jc}) -> surveiller")
         print(f"Radar biotech le {maintenant} : {len(v['lignes'])} ligne(s), "
               f"P&L ouvert {v['pnl_eur']:+.2f} EUR, cash {v['cash_eur']:.2f} EUR, mode {mode}")
+        if not args.local:
+            (biotech.DATA / "last_radar.txt").write_text(
+                datetime.now().isoformat(timespec="seconds"), encoding="utf-8")
         print(f"{'Ticker':<7}{'Qty':>8}{'PRU':>9}{'Cours':>9}{'Valeur €':>9}"
               f"{'P&L €':>8}{'P&L %':>8}  Catalyseur")
         for l in v["lignes"]:
