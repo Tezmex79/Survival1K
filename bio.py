@@ -24,20 +24,39 @@ import sys
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 sys.stderr.reconfigure(encoding="utf-8", errors="replace")
 
-import yaml
+import json as _json
+import urllib.request as _urllib_req
 
+import yaml
 from dotenv import load_dotenv
 
 from engine import biotech
 from engine import broker
-from engine import prices
 
 load_dotenv(biotech.BASE / ".env")
 
 
 def taux_usd(cfg):
-    ex = prices.make_exchange(cfg)
-    return float(ex.fetch_ticker(cfg["exchange"]["taux_usd"])["last"])
+    """Taux EUR/USD via Yahoo (leger, sans ccxt) avec cache disque en secours.
+
+    Le check local de la tache Windows tourne toutes les 15 min : importer ccxt
+    (des centaines de Mo) pour un simple taux provoquait un pic CPU de ~5 s a
+    chaque lancement — remplacé par un simple appel urllib.
+    """
+    cache = biotech.DATA / "taux_usd.txt"
+    try:
+        req = _urllib_req.Request(
+            "https://query1.finance.yahoo.com/v8/finance/chart/EURUSD=X?interval=1d&range=1d",
+            headers={"User-Agent": "Mozilla/5.0"})
+        with _urllib_req.urlopen(req, timeout=10) as r:
+            meta = _json.loads(r.read().decode("utf-8"))["chart"]["result"][0]["meta"]
+        taux = float(meta["regularMarketPrice"])
+        cache.write_text(str(taux), encoding="utf-8")
+        return taux
+    except Exception:
+        if cache.exists():
+            return float(cache.read_text(encoding="utf-8").strip() or 1.12)
+        return 1.12  # dernier recours devolu explicitement dans le journal si utilise
 
 
 def _cles_etoro():
