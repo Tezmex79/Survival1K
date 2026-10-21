@@ -2,6 +2,7 @@
 # StartWhenAvailable : la premiere occurrence manquee pendant la veille s'execute
 # des le reveil). Throttle : ne fait rien si le dernier check local date de <10 min.
 Set-Location "C:\Users\cthezard\DEV\invest"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $stampFile = "data\wake_check.txt"
 $now = Get-Date
 if (Test-Path $stampFile) {
